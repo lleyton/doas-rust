@@ -1,3 +1,4 @@
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
 action = { "permit" | "deny" }
 
 env_name = { (ASCII_ALPHANUMERIC | "_")+ }
@@ -48,7 +49,7 @@ as_target = { "as" ~ SEPARATOR ~ string }
 
 rule_line = ${ SEPARATOR* ~ action ~ SEPARATOR* ~ option_list? ~ SEPARATOR* ~ identity ~ SEPARATOR* ~ as_target? ~ SEPARATOR* ~ command? ~ SEPARATOR* ~ args? ~ SEPARATOR* }
 
-config = @{
+config = {
     SOI ~
     rule_line? ~ (NEWLINE ~ rule_line)* ~
     EOI

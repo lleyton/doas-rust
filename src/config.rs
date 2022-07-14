@@ -151,8 +151,11 @@ pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
     let file = fs::read_to_string(path)?;
 
     let parsed = ConfigParser::parse(Rule::config, &file)?.next().unwrap();
+    let pairs = parsed.into_inner();
 
-    let rules = parsed.into_inner().map(|pair| {
+    let mut rules = Vec::new();
+
+    for pair in pairs {
         if matches!(pair.as_rule(), Rule::rule_line) {
             let mut inner_rules = pair.into_inner();
 
@@ -160,7 +163,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
             let action = match action {
                 "permit" => Action::Permit,
                 "deny" => Action::Deny,
-                _ => panic!("Invalid action"),
+                _ => unreachable!(),
             };
 
             let next = inner_rules.next().unwrap();
@@ -201,16 +204,16 @@ pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
                 }
             }
 
-            rule
-        } else {
-            unreachable!();
+            rules.push(rule);
         }
-    });
+    }
 
-    Ok(rules.collect())
+    Ok(rules)
 }
 
 #[test]
-fn test_parse_config() {
-    parse_config(Path::new("test-config")).unwrap();
+fn test_parse_config() -> Result<(), anyhow::Error> {
+    let config = parse_config(Path::new("test-config"))?;
+    println!("{:#?}", config);
+    Ok(())
 }
