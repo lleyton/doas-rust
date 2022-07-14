@@ -1,0 +1,55 @@
+action = { "permit" | "deny" }
+
+env_name = { (ASCII_ALPHANUMERIC | "_")+ }
+
+unquoted_string_char = { ASCII_ALPHANUMERIC | "." | "_" | "/" | "-"}
+unquoted_string = ${ unquoted_string_char+ }
+quoted_string = _{ "\"" ~ inner_string ~ "\"" }
+inner_string = @{ string_char* }
+string_char = {
+    !("\"" | "\\") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "n")
+}
+
+string = _{ unquoted_string | quoted_string }
+
+setenv_negate = { "-" }
+setenv_variable_only_option = { setenv_negate? ~ env_name }
+
+setenv_set_variable_reference = { "$" ~ env_name }
+setenv_set_variable_option = { env_name ~ "=" ~ (setenv_set_variable_reference | string ) }
+
+setenv_option = _{ setenv_set_variable_option | setenv_variable_only_option }
+setenv_option_list = ${ "{" ~ SEPARATOR* ~ setenv_option ~ (SEPARATOR ~ setenv_option)* ~ setenv_option* ~ SEPARATOR* ~ "}" }
+
+nopass = { "nopass" }
+nolog = { "nolog" }
+persist = { "persist" }
+keepenv = { "keepenv" }
+setenv = ${ "setenv" ~ SEPARATOR ~ setenv_option_list }
+
+
+option = _{ nopass | nolog | persist | keepenv | setenv }
+option_list = { option ~ (SEPARATOR ~ option)* }
+
+command = { string }
+arg = { string }
+args = { arg ~ (SEPARATOR ~ arg)* }
+
+group_iden = { ":" ~ unquoted_string }
+group_id = { ":" ~ ASCII_DIGIT+ }
+
+user_iden = { unquoted_string }
+user_id = { ASCII_DIGIT+ }
+
+identity = { group_id | user_id | group_iden | user_iden }
+
+as_target = { "as" ~ SEPARATOR ~ string }
+
+rule_line = ${ SEPARATOR* ~ action ~ SEPARATOR* ~ option_list? ~ SEPARATOR* ~ identity ~ SEPARATOR* ~ as_target? ~ SEPARATOR* ~ command? ~ SEPARATOR* ~ args? ~ SEPARATOR* }
+
+config = @{
+    SOI ~
+    rule_line? ~ (NEWLINE ~ rule_line)* ~
+    EOI
+}
