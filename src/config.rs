@@ -1,9 +1,9 @@
-use anyhow::bail;
+use anyhow::{bail, Result};
 use pest::{
     iterators::{FlatPairs, Pair, Pairs},
     Parser,
 };
-use std::{fs, path::Path};
+use std::{fs, path::Path, borrow::Borrow};
 
 #[derive(Parser)]
 #[grammar = "config.pest"]
@@ -20,13 +20,14 @@ pub fn find_config() -> Result<&'static Path, anyhow::Error> {
         bail!("Cannot find config file!")
     }
 }
-#[derive(Debug)]
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Action {
     Permit,
     Deny,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum EnvVariable {
     VariableOnly {
         negate: bool,
@@ -39,7 +40,7 @@ pub enum EnvVariable {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Options {
     NoPass,
     NoLog,
@@ -48,15 +49,15 @@ pub enum Options {
     SetEnv(Vec<EnvVariable>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Identity {
     UserName(String),
-    UserId(i32),
+    UserId(u32),
     GroupName(String),
-    GroupId(i32),
+    GroupId(u32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ConfigRule {
     action: Action,
     options: Vec<Options>,
@@ -209,6 +210,82 @@ pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
     }
 
     Ok(rules)
+}
+
+pub struct AuthorizationRequest {
+    uid: u32,
+    gids: Vec<u32>,
+    cmd: Option<String>,
+    args: Option<Vec<String>>,
+    nopass: bool,
+    target: String
+}
+
+pub fn evaluate_rules(rules: Vec<ConfigRule>, request: AuthorizationRequest) -> Result<(Action, Vec<ConfigRule>)> {
+    let mut matching_rules = Vec::new();
+
+    for rule in rules {
+        let cloned = rule.borrow().clone();
+
+        let matches = match rule.identity {
+            Identity::UserName(name) => {
+                let user = users::get_user_by_name(&name);
+
+                match user {
+                    Some(user) => user.uid() == request.uid,
+                    None => false,
+                }
+            },
+            Identity::UserId(id) => id == request.uid,
+            Identity::GroupName(name) => {
+                let group = users::get_group_by_name(&name);
+                
+                match group {
+                    Some(group) => request.gids.contains(&group.gid()),
+                    None => false,
+                }
+            },
+            Identity::GroupId(id) => 
+                request.gids.contains(&id)
+            ,
+        };
+
+        if !matches {
+            continue;
+        }
+
+        if !request.nopass || rule.options.contains(&Options::NoPass) {
+            continue;
+        }
+
+        if let Some(rule_cmd) = rule.cmd {
+            if let Some(req_cmd) = request.cmd.clone() {
+                if rule_cmd != req_cmd {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
+        if let Some(rule_args) = rule.args {
+            if let Some(req_args) = request.args.clone() {
+                if rule_args != req_args {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
+        matching_rules.push(cloned);
+    }
+
+    let last = matching_rules.last();
+    match last {
+        Some(rule) => Ok((rule.action.clone(), matching_rules)),
+        None => Ok((Action::Deny, matching_rules)),
+    }
 }
 
 #[test]
