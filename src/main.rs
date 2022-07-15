@@ -89,8 +89,9 @@ fn main() -> Result<()> {
         bail!("Access denied!");
     }
 
-    if !args.non_interactive {
-        let mut auth = Authenticator::with_password("system_auth")
+    if !rules.last().unwrap().options.contains(&config::Options::NoPass) {
+        // TODO: not sure what a service is, but I think we need to install one
+        let mut auth = Authenticator::with_password("sudo")
             .with_context(|| format!("Failed to start PAM client"))?;
 
         let password = rpassword::prompt_password("Password: ")
@@ -109,7 +110,7 @@ fn main() -> Result<()> {
 
     let target = get_user_by_name(&target).unwrap();
 
-    // TODO: handle envs and all of the other goodies
+    // TODO: handle envs and all of the other goodies (and shell)
 
     let output = Command::new("whoami").uid(target.uid()).exec();
     Err(anyhow::Error::new(output))

@@ -59,12 +59,12 @@ pub enum Identity {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ConfigRule {
-    action: Action,
-    options: Vec<Options>,
-    identity: Identity,
-    as_user: Option<String>,
-    cmd: Option<String>,
-    args: Option<Vec<String>>,
+    pub action: Action,
+    pub options: Vec<Options>,
+    pub identity: Identity,
+    pub as_user: Option<String>,
+    pub cmd: Option<String>,
+    pub args: Option<Vec<String>>,
 }
 
 fn parse_options(pairs: Pairs<Rule>) -> Vec<Options> {
@@ -255,7 +255,7 @@ pub fn evaluate_rules(
             continue;
         }
 
-        if !request.nopass || rule.options.contains(&Options::NoPass) {
+        if request.nopass && !rule.options.contains(&Options::NoPass) {
             continue;
         }
 
