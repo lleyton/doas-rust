@@ -2,10 +2,10 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use config::find_config;
 use pam::Authenticator;
-use std::{os::unix::prelude::CommandExt, process::Command};
+use std::{os::unix::prelude::CommandExt, process::Command, env};
 use users::{
-    get_current_gid, get_current_uid, get_current_username, get_user_by_uid, group_access_list,
-    switch::{set_both_uid, set_effective_gid, set_effective_uid}, get_user_by_name,
+    get_current_gid, get_current_uid, get_user_by_uid,
+    switch::{set_effective_gid, set_effective_uid}, get_user_by_name, os::unix::UserExt,
 };
 
 mod config;
@@ -29,10 +29,10 @@ struct Cli {
     #[clap(short = 'L')]
     clear_past_authentications: bool,
 
-    #[clap(short = 's')]
+    #[clap(short = 's', name = "execute_shell")]
     execute_shell: bool,
 
-    #[clap(value_parser)]
+    #[clap(value_parser, required_unless_present("execute_shell"))]
     command: Option<String>,
 
     #[clap(value_parser)]
@@ -40,13 +40,13 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    // Hardening, we drop our permissions down to what the user can do.
+    set_effective_uid(get_current_uid())?;
+    set_effective_gid(get_current_gid())?;
+
     let args = Cli::parse();
 
     if let Some(path) = args.check_config {
-        // TODO: Make sure this prevents user from opening a file they don't have access to
-        set_effective_gid(get_current_gid())?;
-        set_effective_uid(get_current_uid())?;
-
         let config = config::parse_config(&path)?;
         println!("{} rules successfully parsed!", config.len());
 
@@ -73,12 +73,19 @@ fn main() -> Result<()> {
 
     let target = args.execute_as_user.clone();
 
+    let command = match args.command {
+        Some(command) => command,
+        None => {
+            env::var("SHELL").unwrap_or(user.shell().to_str().unwrap().to_string())
+        }
+    };
+
     let (action, rules) = config::evaluate_rules(
         config,
         config::AuthorizationRequest {
             uid: user.uid(),
             gids: groups,
-            cmd: args.command,
+            cmd: command.clone(),
             args: args.args,
             nopass: args.non_interactive,
             target: args.execute_as_user,
@@ -112,6 +119,6 @@ fn main() -> Result<()> {
 
     // TODO: handle envs and all of the other goodies (and shell)
 
-    let output = Command::new("whoami").uid(target.uid()).exec();
+    let output = Command::new(command).uid(target.uid()).exec();
     Err(anyhow::Error::new(output))
 }

@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{Result};
 use pest::{
-    iterators::{FlatPairs, Pair, Pairs},
+    iterators::{Pair, Pairs},
     Parser,
 };
 use std::{borrow::Borrow, fs, path::Path};
@@ -215,7 +215,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
 pub struct AuthorizationRequest {
     pub uid: u32,
     pub gids: Vec<u32>,
-    pub cmd: Option<String>,
+    pub cmd: String,
     pub args: Vec<String>,
     pub nopass: bool,
     pub target: String,
@@ -260,13 +260,9 @@ pub fn evaluate_rules(
         }
 
         if let Some(rule_cmd) = rule.cmd {
-            if let Some(req_cmd) = request.cmd.clone() {
-                if rule_cmd != req_cmd {
+                if rule_cmd != request.cmd {
                     continue;
                 }
-            } else {
-                continue;
-            }
         }
 
         if let Some(rule_args) = rule.args {
