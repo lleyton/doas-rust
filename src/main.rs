@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use config::find_config;
 use pam::Authenticator;
-use std::{os::unix::prelude::CommandExt, process::Command, env};
+use std::{os::unix::prelude::CommandExt, process::Command, env, collections::HashMap};
 use users::{
     get_current_gid, get_current_uid, get_user_by_uid,
     switch::{set_effective_gid, set_effective_uid}, get_user_by_name, os::unix::UserExt,
@@ -96,7 +96,9 @@ fn main() -> Result<()> {
         bail!("Access denied!");
     }
 
-    if !rules.last().unwrap().options.contains(&config::Options::NoPass) {
+    let last = rules.last().unwrap();
+
+    if !last.options.contains(&config::Options::NoPass) {
         // TODO: not sure what a service is, but I think we need to install one
         let mut auth = Authenticator::with_password("sudo")
             .with_context(|| format!("Failed to start PAM client"))?;
@@ -119,6 +121,60 @@ fn main() -> Result<()> {
 
     // TODO: handle envs and all of the other goodies (and shell)
 
-    let output = Command::new(command).uid(target.uid()).args(args.args).exec();
+    let mut env = HashMap::new();
+
+    env.insert("DOAS_USER".to_owned(), user.name().to_str().unwrap().to_string());
+    env.insert("HOME".to_owned(), target.home_dir().to_str().unwrap().to_string());
+    env.insert("LOGNAME".to_owned(), target.name().to_str().unwrap().to_string());
+    env.insert("PATH".to_owned(), "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin".to_string());
+    // TODO: This might be different from the user's shell
+    env.insert("SHELL".to_owned(), target.shell().to_str().unwrap().to_string());
+    env.insert("USER".to_owned(), target.name().to_str().unwrap().to_string());
+
+    if let Ok(val) = env::var("DISPLAY") {
+        env.insert("DISPLAY".to_owned(), val);
+    }
+
+    if let Ok(val) = env::var("TERM") {
+        env.insert("TERM".to_owned(), val);
+    }
+
+    for option in last.options.clone() {
+        match option {
+            config::Options::SetEnv(envs) => {
+                for e in envs {
+                    match e {
+                        config::EnvVariable::VariableOnly { negate, name } => {
+                            if negate {
+                                env.remove(&name);
+                            } else {
+                                if let Ok(val) = env::var(name.clone()) {
+                                    env.insert(name, val);
+                                }
+                            }
+                        },
+                        config::EnvVariable::VariableSet { name, value, reference } => {
+                            if reference {
+                                if let Ok(val) = env::var(value) {
+                                    env.insert(name, val);
+                                }
+
+                                continue;
+                            }
+
+                            env.insert(name, value);
+                        },
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+
+    // TODO: SO MANY CLONES
+    // TODO: Look into using &str instead of String
+    // TODO: syslog
+
+    let output = Command::new(command).uid(target.uid()).envs(&env).args(args.args).exec();
     Err(anyhow::Error::new(output))
 }
