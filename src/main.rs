@@ -86,7 +86,7 @@ fn main() -> Result<()> {
             uid: user.uid(),
             gids: groups,
             cmd: command.clone(),
-            args: args.args,
+            args: args.args.clone(),
             nopass: args.non_interactive,
             target: args.execute_as_user,
         },
@@ -119,6 +119,6 @@ fn main() -> Result<()> {
 
     // TODO: handle envs and all of the other goodies (and shell)
 
-    let output = Command::new(command).uid(target.uid()).exec();
+    let output = Command::new(command).uid(target.uid()).args(args.args).exec();
     Err(anyhow::Error::new(output))
 }
