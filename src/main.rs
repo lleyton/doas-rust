@@ -79,7 +79,7 @@ fn main() -> Result<()> {
         ),
     };
 
-    let target = get_user_by_name(&args.execute_as_user.clone()).unwrap();
+    let target = get_user_by_name(&args.execute_as_user).unwrap();
 
     let command = match args.command {
         Some(command) => command,
@@ -212,7 +212,7 @@ fn main() -> Result<()> {
                             if negate {
                                 env.remove(&name);
                             } else {
-                                if let Ok(val) = env::var(name.clone()) {
+                                if let Ok(val) = env::var(&name) {
                                     env.insert(name, val);
                                 }
                             }
