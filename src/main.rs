@@ -2,10 +2,17 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use config::find_config;
 use pam::Authenticator;
-use std::{os::unix::prelude::CommandExt, process::Command, env, collections::HashMap};
+use std::{
+    collections::HashMap,
+    env,
+    os::unix::prelude::CommandExt,
+    process::{self, Command},
+};
+use syslog::{Facility, Formatter3164};
 use users::{
-    get_current_gid, get_current_uid, get_user_by_uid,
-    switch::{set_effective_gid, set_effective_uid}, get_user_by_name, os::unix::UserExt,
+    get_current_gid, get_current_uid, get_user_by_name, get_user_by_uid,
+    os::unix::UserExt,
+    switch::{set_effective_gid, set_effective_uid},
 };
 
 mod config;
@@ -46,6 +53,7 @@ fn main() -> Result<()> {
 
     let args = Cli::parse();
 
+    // TODO: Fancier error handling.
     if let Some(path) = args.check_config {
         let config = config::parse_config(&path)?;
         println!("{} rules successfully parsed!", config.len());
@@ -71,14 +79,22 @@ fn main() -> Result<()> {
         ),
     };
 
-    let target = args.execute_as_user.clone();
+    let target = get_user_by_name(&args.execute_as_user.clone()).unwrap();
 
     let command = match args.command {
         Some(command) => command,
-        None => {
-            env::var("SHELL").unwrap_or(user.shell().to_str().unwrap().to_string())
-        }
+        None => env::var("SHELL").unwrap_or(user.shell().to_str().unwrap().to_string()),
     };
+
+    let formatter = Formatter3164 {
+        facility: Facility::LOG_USER,
+        hostname: None,
+        process: "doas-rust".into(),
+        pid: process::id(),
+    };
+
+    // I can't ? here for some reason
+    let mut syslog = syslog::unix(formatter).unwrap();
 
     let (action, rules) = config::evaluate_rules(
         config,
@@ -93,6 +109,15 @@ fn main() -> Result<()> {
     )?;
 
     if action == config::Action::Deny {
+        syslog
+            .notice(format!(
+                "user {} denied access to run \"{} {}\" as {}",
+                user.name().to_str().unwrap(),
+                command,
+                args.args.join(" "),
+                target.name().to_str().unwrap()
+            ))
+            .unwrap();
         bail!("Access denied!");
     }
 
@@ -109,27 +134,56 @@ fn main() -> Result<()> {
         auth.get_handler()
             .set_credentials(user.name().to_str().unwrap(), password);
 
-        auth.authenticate()
-            .with_context(|| format!("Failed to authenticate with PAM"))?;
+        let result = auth.authenticate();
+
+        if result.is_err() {
+            syslog
+                .notice(format!(
+                    "user {} failed authentication check to run \"{} {}\" as {}",
+                    user.name().to_str().unwrap(),
+                    command,
+                    args.args.join(" "),
+                    target.name().to_str().unwrap()
+                ))
+                .unwrap();
+        }
+
+        result.with_context(|| format!("Failed to authenticate with PAM"))?;
 
         // TODO: no idea what this does
         auth.open_session()
             .with_context(|| format!("Failed to open session with PAM"))?;
     }
 
-    let target = get_user_by_name(&target).unwrap();
-
     // TODO: handle envs and all of the other goodies (and shell)
 
     let mut env = HashMap::new();
 
-    env.insert("DOAS_USER".to_owned(), user.name().to_str().unwrap().to_string());
-    env.insert("HOME".to_owned(), target.home_dir().to_str().unwrap().to_string());
-    env.insert("LOGNAME".to_owned(), target.name().to_str().unwrap().to_string());
-    env.insert("PATH".to_owned(), "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin".to_string());
+    env.insert(
+        "DOAS_USER".to_owned(),
+        user.name().to_str().unwrap().to_string(),
+    );
+    env.insert(
+        "HOME".to_owned(),
+        target.home_dir().to_str().unwrap().to_string(),
+    );
+    env.insert(
+        "LOGNAME".to_owned(),
+        target.name().to_str().unwrap().to_string(),
+    );
+    env.insert(
+        "PATH".to_owned(),
+        "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin".to_string(),
+    );
     // TODO: This might be different from the user's shell
-    env.insert("SHELL".to_owned(), target.shell().to_str().unwrap().to_string());
-    env.insert("USER".to_owned(), target.name().to_str().unwrap().to_string());
+    env.insert(
+        "SHELL".to_owned(),
+        target.shell().to_str().unwrap().to_string(),
+    );
+    env.insert(
+        "USER".to_owned(),
+        target.name().to_str().unwrap().to_string(),
+    );
 
     if let Ok(val) = env::var("DISPLAY") {
         env.insert("DISPLAY".to_owned(), val);
@@ -138,6 +192,16 @@ fn main() -> Result<()> {
     if let Ok(val) = env::var("TERM") {
         env.insert("TERM".to_owned(), val);
     }
+
+    if last.options.contains(&config::Options::KeepEnv) {
+        for (key, value) in env::vars() {
+            if vec!["DOAS_USER", "HOME", "LOGNAME", "PATH", "SHELL", "USER", "DISPLAY", "TERM"].contains(&key.as_str()) {
+                continue;
+            }
+
+            env.insert(key, value);
+        }
+    };
 
     for option in last.options.clone() {
         match option {
@@ -152,8 +216,12 @@ fn main() -> Result<()> {
                                     env.insert(name, val);
                                 }
                             }
-                        },
-                        config::EnvVariable::VariableSet { name, value, reference } => {
+                        }
+                        config::EnvVariable::VariableSet {
+                            name,
+                            value,
+                            reference,
+                        } => {
                             if reference {
                                 if let Ok(val) = env::var(value) {
                                     env.insert(name, val);
@@ -163,18 +231,33 @@ fn main() -> Result<()> {
                             }
 
                             env.insert(name, value);
-                        },
+                        }
                     }
                 }
-            },
+            }
             _ => {}
         }
     }
 
     // TODO: SO MANY CLONES
     // TODO: Look into using &str instead of String
-    // TODO: syslog
 
-    let output = Command::new(command).uid(target.uid()).envs(&env).args(args.args).exec();
+    if !last.options.contains(&config::Options::NoLog) {
+        syslog
+            .notice(format!(
+                "user {} granted access to run \"{} {}\" as {}",
+                user.name().to_str().unwrap(),
+                command,
+                args.args.join(" "),
+                target.name().to_str().unwrap()
+            ))
+            .unwrap();
+    }
+
+    let output = Command::new(command)
+        .uid(target.uid())
+        .envs(&env)
+        .args(args.args)
+        .exec();
     Err(anyhow::Error::new(output))
 }

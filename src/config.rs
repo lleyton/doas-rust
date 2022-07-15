@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use pest::{
     iterators::{Pair, Pairs},
     Parser,
@@ -260,9 +260,9 @@ pub fn evaluate_rules(
         }
 
         if let Some(rule_cmd) = rule.cmd {
-                if rule_cmd != request.cmd {
-                    continue;
-                }
+            if rule_cmd != request.cmd {
+                continue;
+            }
         }
 
         if let Some(rule_args) = rule.args {
