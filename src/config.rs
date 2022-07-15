@@ -3,21 +3,21 @@ use pest::{
     iterators::{FlatPairs, Pair, Pairs},
     Parser,
 };
-use std::{fs, path::Path, borrow::Borrow};
+use std::{borrow::Borrow, fs, path::Path};
 
 #[derive(Parser)]
 #[grammar = "config.pest"]
 pub struct ConfigParser;
 
-pub fn find_config() -> Result<&'static Path, anyhow::Error> {
+pub fn find_config() -> Option<&'static Path> {
     let doas_rust_path = Path::new("/etc/doas-rust.conf");
     let doas_path = Path::new("/etc/doas.conf");
     if doas_rust_path.exists() {
-        Ok(doas_rust_path)
+        Some(doas_rust_path)
     } else if doas_path.exists() {
-        Ok(doas_path)
+        Some(doas_path)
     } else {
-        bail!("Cannot find config file!")
+        None
     }
 }
 
@@ -213,15 +213,18 @@ pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
 }
 
 pub struct AuthorizationRequest {
-    uid: u32,
-    gids: Vec<u32>,
-    cmd: Option<String>,
-    args: Option<Vec<String>>,
-    nopass: bool,
-    target: String
+    pub uid: u32,
+    pub gids: Vec<u32>,
+    pub cmd: Option<String>,
+    pub args: Vec<String>,
+    pub nopass: bool,
+    pub target: String,
 }
 
-pub fn evaluate_rules(rules: Vec<ConfigRule>, request: AuthorizationRequest) -> Result<(Action, Vec<ConfigRule>)> {
+pub fn evaluate_rules(
+    rules: Vec<ConfigRule>,
+    request: AuthorizationRequest,
+) -> Result<(Action, Vec<ConfigRule>)> {
     let mut matching_rules = Vec::new();
 
     for rule in rules {
@@ -235,19 +238,17 @@ pub fn evaluate_rules(rules: Vec<ConfigRule>, request: AuthorizationRequest) -> 
                     Some(user) => user.uid() == request.uid,
                     None => false,
                 }
-            },
+            }
             Identity::UserId(id) => id == request.uid,
             Identity::GroupName(name) => {
                 let group = users::get_group_by_name(&name);
-                
+
                 match group {
                     Some(group) => request.gids.contains(&group.gid()),
                     None => false,
                 }
-            },
-            Identity::GroupId(id) => 
-                request.gids.contains(&id)
-            ,
+            }
+            Identity::GroupId(id) => request.gids.contains(&id),
         };
 
         if !matches {
@@ -269,11 +270,13 @@ pub fn evaluate_rules(rules: Vec<ConfigRule>, request: AuthorizationRequest) -> 
         }
 
         if let Some(rule_args) = rule.args {
-            if let Some(req_args) = request.args.clone() {
-                if rule_args != req_args {
-                    continue;
-                }
-            } else {
+            if rule_args != request.args {
+                continue;
+            }
+        }
+
+        if let Some(rule_target) = rule.as_user {
+            if rule_target != request.target {
                 continue;
             }
         }
