@@ -1,11 +1,11 @@
-use anyhow::{bail, Context};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use config::find_config;
 use pam::Authenticator;
 use std::{os::unix::prelude::CommandExt, process::Command};
 use users::{
     get_current_gid, get_current_uid, get_current_username, get_user_by_uid, group_access_list,
-    switch::{set_both_uid, set_effective_gid, set_effective_uid},
+    switch::{set_both_uid, set_effective_gid, set_effective_uid}, get_user_by_name,
 };
 
 mod config;
@@ -39,7 +39,7 @@ struct Cli {
     args: Vec<String>,
 }
 
-fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<()> {
     let args = Cli::parse();
 
     if let Some(path) = args.check_config {
@@ -70,6 +70,8 @@ fn main() -> Result<(), anyhow::Error> {
             user.name().to_str().unwrap()
         ),
     };
+
+    let target = args.execute_as_user.clone();
 
     let (action, rules) = config::evaluate_rules(
         config,
@@ -105,5 +107,10 @@ fn main() -> Result<(), anyhow::Error> {
             .with_context(|| format!("Failed to open session with PAM"))?;
     }
 
-    Ok(())
+    let target = get_user_by_name(&target).unwrap();
+
+    // TODO: handle envs and all of the other goodies
+
+    let output = Command::new("whoami").uid(target.uid()).exec();
+    Err(anyhow::Error::new(output))
 }
