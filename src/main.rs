@@ -258,6 +258,7 @@ fn main() -> Result<()> {
     // NOTE: set_both_uid calls setreuid which is universial on unix and should set the SUID bit to the ruid
     // This should be safe, but I'll test more later
     // Linux has setresuid which takes a SUID param making this easier
+    // https://man7.org/linux/man-pages/man2/setreuid.2.html
     set_both_uid(target.uid(), target.uid())?;
     set_both_gid(target.primary_group_id(), target.primary_group_id())?;
 
