@@ -155,7 +155,7 @@ fn main() -> Result<()> {
             .with_context(|| format!("Failed to open session with PAM"))?;
     }
 
-    // TODO: We handle everything but some SHELL funkyness and the "persist" option
+    // TODO: We handle everything but the "persist" option
 
     let mut env = HashMap::new();
 
@@ -175,7 +175,6 @@ fn main() -> Result<()> {
         "PATH".to_owned(),
         "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin".to_string(),
     );
-    // TODO: This might be different from the user's shell
     env.insert(
         "SHELL".to_owned(),
         target.shell().to_str().unwrap().to_string(),
@@ -260,11 +259,6 @@ fn main() -> Result<()> {
             .unwrap();
     }
 
-    // TODO What about the suid?
-    // NOTE: set_both_uid calls setreuid which is universial on unix and should set the SUID bit to the ruid
-    // This should be safe, but I'll test more later
-    // Linux has setresuid which takes a SUID param making this easier
-    // https://man7.org/linux/man-pages/man2/setreuid.2.html
     set_both_uid(target.uid(), target.uid())?;
     set_both_gid(target.primary_group_id(), target.primary_group_id())?;
 
