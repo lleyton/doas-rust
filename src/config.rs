@@ -21,7 +21,7 @@ pub fn find_config() -> Option<&'static Path> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Action {
     Permit,
     Deny,
@@ -212,13 +212,13 @@ pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
     Ok(rules)
 }
 
-pub struct AuthorizationRequest {
+pub struct AuthorizationRequest<'a> {
     pub uid: u32,
-    pub gids: Vec<u32>,
-    pub cmd: String,
-    pub args: Vec<String>,
+    pub gids: &'a Vec<u32>,
+    pub cmd: &'a String,
+    pub args: &'a Vec<String>,
     pub nopass: bool,
-    pub target: String,
+    pub target: &'a String,
 }
 
 pub fn evaluate_rules(
@@ -228,27 +228,25 @@ pub fn evaluate_rules(
     let mut matching_rules = Vec::new();
 
     for rule in rules {
-        let cloned = rule.borrow().clone();
-
-        let matches = match rule.identity {
+        let matches = match &rule.identity {
             Identity::UserName(name) => {
-                let user = users::get_user_by_name(&name);
+                let user = users::get_user_by_name(name);
 
                 match user {
                     Some(user) => user.uid() == request.uid,
                     None => false,
                 }
             }
-            Identity::UserId(id) => id == request.uid,
+            Identity::UserId(id) => *id == request.uid,
             Identity::GroupName(name) => {
-                let group = users::get_group_by_name(&name);
+                let group = users::get_group_by_name(name);
 
                 match group {
                     Some(group) => request.gids.contains(&group.gid()),
                     None => false,
                 }
             }
-            Identity::GroupId(id) => request.gids.contains(&id),
+            Identity::GroupId(id) => request.gids.contains(id),
         };
 
         if !matches {
@@ -259,30 +257,30 @@ pub fn evaluate_rules(
             continue;
         }
 
-        if let Some(rule_cmd) = rule.cmd {
+        if let Some(rule_cmd) = &rule.cmd {
             if rule_cmd != request.cmd {
                 continue;
             }
         }
 
-        if let Some(rule_args) = rule.args {
+        if let Some(rule_args) = &rule.args {
             if rule_args != request.args {
                 continue;
             }
         }
 
-        if let Some(rule_target) = rule.as_user {
+        if let Some(rule_target) = &rule.as_user {
             if rule_target != request.target {
                 continue;
             }
         }
 
-        matching_rules.push(cloned);
+        matching_rules.push(rule);
     }
 
     let last = matching_rules.last();
     match last {
-        Some(rule) => Ok((rule.action.clone(), matching_rules)),
+        Some(rule) => Ok((rule.action, matching_rules)),
         None => Ok((Action::Deny, matching_rules)),
     }
 }

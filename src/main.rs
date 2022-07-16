@@ -12,7 +12,7 @@ use syslog::{Facility, Formatter3164};
 use users::{
     get_current_gid, get_current_uid, get_user_by_name, get_user_by_uid,
     os::unix::UserExt,
-    switch::{set_effective_gid, set_effective_uid, set_both_gid, set_both_uid},
+    switch::{set_both_gid, set_both_uid, set_effective_gid, set_effective_uid},
 };
 
 mod config;
@@ -100,11 +100,11 @@ fn main() -> Result<()> {
         config,
         config::AuthorizationRequest {
             uid: user.uid(),
-            gids: groups,
-            cmd: command.clone(),
-            args: args.args.clone(),
+            gids: &groups,
+            cmd: &command,
+            args: &args.args,
             nopass: args.non_interactive,
-            target: args.execute_as_user,
+            target: &args.execute_as_user,
         },
     )?;
 
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
     let last = rules.last().unwrap();
 
     if !last.options.contains(&config::Options::NoPass) {
-        // TODO: not sure what a service is, but I think we need to install one
+        // TODO: Write a proper PAM config (look at sudo as an example) and use it.
         let mut auth = Authenticator::with_password("sudo")
             .with_context(|| format!("Failed to start PAM client"))?;
 
@@ -195,7 +195,18 @@ fn main() -> Result<()> {
 
     if last.options.contains(&config::Options::KeepEnv) {
         for (key, value) in env::vars() {
-            if vec!["DOAS_USER", "HOME", "LOGNAME", "PATH", "SHELL", "USER", "DISPLAY", "TERM"].contains(&key.as_str()) {
+            if vec![
+                "DOAS_USER",
+                "HOME",
+                "LOGNAME",
+                "PATH",
+                "SHELL",
+                "USER",
+                "DISPLAY",
+                "TERM",
+            ]
+            .contains(&key.as_str())
+            {
                 continue;
             }
 
@@ -203,44 +214,39 @@ fn main() -> Result<()> {
         }
     };
 
-    for option in last.options.clone() {
-        match option {
-            config::Options::SetEnv(envs) => {
-                for e in envs {
-                    match e {
-                        config::EnvVariable::VariableOnly { negate, name } => {
-                            if negate {
-                                env.remove(&name);
-                            } else {
-                                if let Ok(val) = env::var(&name) {
-                                    env.insert(name, val);
-                                }
-                            }
-                        }
-                        config::EnvVariable::VariableSet {
-                            name,
-                            value,
-                            reference,
-                        } => {
-                            if reference {
-                                if let Ok(val) = env::var(value) {
-                                    env.insert(name, val);
-                                }
-
-                                continue;
-                            }
-
-                            env.insert(name, value);
+    if let Some(setenv_values) = last.options.iter().find_map(|o| match o {
+        config::Options::SetEnv(envs) => Some(envs),
+        _ => None,
+    }) {
+        for e in setenv_values.clone() {
+            match e {
+                config::EnvVariable::VariableOnly { negate, name } => {
+                    if negate {
+                        env.remove(&name);
+                    } else {
+                        if let Ok(val) = env::var(&name) {
+                            env.insert(name, val);
                         }
                     }
                 }
-            }
-            _ => {}
-        }
-    }
+                config::EnvVariable::VariableSet {
+                    name,
+                    value,
+                    reference,
+                } => {
+                    if reference {
+                        if let Ok(val) = env::var(value) {
+                            env.insert(name, val);
+                        }
 
-    // TODO: SO MANY CLONES
-    // TODO: Look into using &str instead of String
+                        continue;
+                    }
+
+                    env.insert(name, value);
+                }
+            }
+        }
+    };
 
     if !last.options.contains(&config::Options::NoLog) {
         syslog
@@ -262,9 +268,6 @@ fn main() -> Result<()> {
     set_both_uid(target.uid(), target.uid())?;
     set_both_gid(target.primary_group_id(), target.primary_group_id())?;
 
-    let output = Command::new(command)
-        .envs(&env)
-        .args(args.args)
-        .exec();
+    let output = Command::new(command).envs(&env).args(args.args).exec();
     Err(anyhow::Error::new(output))
 }
