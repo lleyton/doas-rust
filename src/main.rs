@@ -12,7 +12,7 @@ use syslog::{Facility, Formatter3164};
 use users::{
     get_current_gid, get_current_uid, get_user_by_name, get_user_by_uid,
     os::unix::UserExt,
-    switch::{set_effective_gid, set_effective_uid},
+    switch::{set_effective_gid, set_effective_uid, set_both_gid, set_both_uid},
 };
 
 mod config;
@@ -253,9 +253,11 @@ fn main() -> Result<()> {
             ))
             .unwrap();
     }
+    
+    set_both_uid(target.uid(), target.uid())?;
+    set_both_gid(target.primary_group_id(), target.primary_group_id())?;
 
     let output = Command::new(command)
-        .uid(target.uid())
         .envs(&env)
         .args(args.args)
         .exec();
