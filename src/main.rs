@@ -253,7 +253,8 @@ fn main() -> Result<()> {
             ))
             .unwrap();
     }
-    
+
+    // TODO What about the suid?
     set_both_uid(target.uid(), target.uid())?;
     set_both_gid(target.primary_group_id(), target.primary_group_id())?;
 
