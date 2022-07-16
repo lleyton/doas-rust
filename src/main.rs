@@ -155,7 +155,7 @@ fn main() -> Result<()> {
             .with_context(|| format!("Failed to open session with PAM"))?;
     }
 
-    // TODO: handle envs and all of the other goodies (and shell)
+    // TODO: We handle everything but some SHELL funkyness and the "persist" option
 
     let mut env = HashMap::new();
 
