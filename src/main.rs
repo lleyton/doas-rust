@@ -23,8 +23,7 @@ extern crate pest_derive;
 
 #[derive(clap::Parser)]
 struct Cli {
-    #[clap(short = 'C')]
-    #[clap(parse(from_os_str))]
+    #[clap(short = 'C', name = "check_config", parse(from_os_str))]
     check_config: Option<std::path::PathBuf>,
 
     #[clap(short = 'u', default_value = "root")]
@@ -39,7 +38,12 @@ struct Cli {
     #[clap(short = 's', name = "execute_shell")]
     execute_shell: bool,
 
-    #[clap(value_parser, required_unless_present("execute_shell"))]
+    #[clap(
+        value_parser,
+        required_unless_present("execute_shell"),
+        required_unless_present("check_config"),
+        required_unless_present("clear_past_authentications")
+    )]
     command: Option<String>,
 
     #[clap(value_parser)]

@@ -3,7 +3,7 @@ use pest::{
     iterators::{Pair, Pairs},
     Parser,
 };
-use std::{borrow::Borrow, fs, path::Path};
+use std::{fs, path::Path};
 
 #[derive(Parser)]
 #[grammar = "config.pest"]
@@ -150,6 +150,9 @@ fn parse_identity(pair: Pair<Rule>) -> Identity {
 
 pub fn parse_config(path: &Path) -> Result<Vec<ConfigRule>, anyhow::Error> {
     let file = fs::read_to_string(path)?;
+
+    if let Err(owo) = ConfigParser::parse(Rule::config, &file) {
+    }
 
     let parsed = ConfigParser::parse(Rule::config, &file)?.next().unwrap();
     let pairs = parsed.into_inner();
