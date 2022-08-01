@@ -5,3 +5,6 @@ build:
 
 run *ARGS: build
 	./target/debug/doas-rust {{ARGS}}
+
+test:
+	cargo test

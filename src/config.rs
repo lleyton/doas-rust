@@ -287,7 +287,6 @@ pub fn evaluate_rules(
 
 #[test]
 fn test_parse_config() -> Result<(), anyhow::Error> {
-    let config = parse_config(Path::new("test-config"))?;
-    println!("{:#?}", config);
+    parse_config(Path::new("test-config"))?;
     Ok(())
 }
