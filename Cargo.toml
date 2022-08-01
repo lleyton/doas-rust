@@ -2,6 +2,8 @@
 name = "doas-rust"
 version = "0.1.0"
 edition = "2021"
+description = "A simple, secure, and fast alternative to sudo and doas in Rust, sporting full compatability with doas."
+authors = ["Lleyton Gray <lleyton@fyralabs.com>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

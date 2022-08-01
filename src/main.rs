@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::Parser;
-use config::find_config;
+use config::{find_config, Action};
 use pam::Authenticator;
 use std::{
     collections::HashMap,
@@ -22,27 +22,34 @@ extern crate pest;
 extern crate pest_derive;
 
 #[derive(clap::Parser)]
+#[clap(author, version, about, long_about = None)]
 struct Cli {
+    /// Validates the configuration file, running a permissions check if a command is specified, which returns either 'permit', 'permit nopass', or 'deny'
     #[clap(short = 'C', name = "check_config", parse(from_os_str))]
     check_config: Option<std::path::PathBuf>,
 
-    #[clap(short = 'u', default_value = "root")]
-    execute_as_user: String,
+    /// The user to execute the command as
+    #[clap(short = 'u', default_value = "root", name = "execute_as")]
+    execute_as: String,
 
-    #[clap(short = 'n')]
+    /// Runs non-interactively, fails if the matched rule doesn't set nopass
+    #[clap(short = 'n', name = "non_interactive")]
     non_interactive: bool,
 
-    #[clap(short = 'L')]
+    #[clap(short = 'L', name = "clear_past_authentications")]
     clear_past_authentications: bool,
 
+    /// Executes the current user's shell (from $SHELL or /etc/passwd) instead of a command
     #[clap(short = 's', name = "execute_shell")]
     execute_shell: bool,
 
+    /// The command to execute
     #[clap(
         value_parser,
         required_unless_present("execute_shell"),
         required_unless_present("check_config"),
-        required_unless_present("clear_past_authentications")
+        required_unless_present("clear_past_authentications"),
+        name = "command"
     )]
     command: Option<String>,
 
@@ -57,19 +64,6 @@ fn main() -> Result<()> {
 
     let args = Cli::parse();
 
-    // TODO: Fancier error handling.
-    if let Some(path) = args.check_config {
-        let config = config::parse_config(&path)?;
-        println!("{} rules successfully parsed!", config.len());
-
-        return Ok(());
-    }
-
-    let config = match find_config() {
-        None => bail!("No config file found!"),
-        Some(path) => config::parse_config(&path)?,
-    };
-
     let user = match get_user_by_uid(get_current_uid()) {
         None => bail!("Could not find user with uid {}", get_current_uid()),
         Some(user) => user,
@@ -83,11 +77,59 @@ fn main() -> Result<()> {
         ),
     };
 
-    let target = get_user_by_name(&args.execute_as_user).unwrap();
+    let target = get_user_by_name(&args.execute_as).unwrap();
 
     let command = match args.command {
-        Some(command) => command,
-        None => env::var("SHELL").unwrap_or(user.shell().to_str().unwrap().to_string()),
+        Some(command) => Some(command),
+        None if args.execute_shell => {
+            Some(env::var("SHELL").unwrap_or(user.shell().to_str().unwrap().to_string()))
+        }
+        None => None,
+    };
+
+    // TODO: Fancier error handling.
+    if let Some(path) = args.check_config {
+        let config = config::parse_config(&path)?;
+
+        if command.is_none() {
+            return Ok(());
+        }
+
+        let (action, rules) = config::evaluate_rules(
+            config,
+            config::AuthorizationRequest {
+                uid: user.uid(),
+                gids: &groups,
+                cmd: &command.unwrap(),
+                args: &args.args,
+                nopass: args.non_interactive,
+                target: &args.execute_as,
+            },
+        )?;
+
+        match action {
+            Action::Deny => {
+                println!("deny");
+            }
+            Action::Permit => {
+                let last = rules.last().unwrap();
+
+                if last.options.contains(&config::Options::NoPass) {
+                    println!("permit nopass")
+                } else {
+                    println!("permit")
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
+    let command = command.unwrap();
+
+    let config = match find_config() {
+        None => bail!("No config file found!"),
+        Some(path) => config::parse_config(&path)?,
     };
 
     let formatter = Formatter3164 {
@@ -108,7 +150,7 @@ fn main() -> Result<()> {
             cmd: &command,
             args: &args.args,
             nopass: args.non_interactive,
-            target: &args.execute_as_user,
+            target: &args.execute_as,
         },
     )?;
 
