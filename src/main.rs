@@ -87,7 +87,6 @@ fn main() -> Result<()> {
         None => None,
     };
 
-    // TODO: Fancier error handling.
     if let Some(path) = args.check_config {
         let config = config::parse_config(&path)?;
 
@@ -170,7 +169,6 @@ fn main() -> Result<()> {
     let last = rules.last().unwrap();
 
     if !last.options.contains(&config::Options::NoPass) {
-        // TODO: Write a proper PAM config (look at sudo as an example) and use it.
         let mut auth = Authenticator::with_password("sudo")
             .with_context(|| format!("Failed to start PAM client"))?;
 
