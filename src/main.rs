@@ -2,13 +2,14 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use config::{find_config, Action};
 use lazy_static::lazy_static;
-use nix::{unistd::{getgid, getuid}};
-use pam::Authenticator;
+use nix::unistd::{getgid, getuid};
+use pam_client::conv_cli::Conversation;
 use std::{
     collections::HashMap,
     env,
     os::unix::prelude::CommandExt,
-    process::{self, Command}, time::Duration,
+    process::{self, Command},
+    time::Duration,
 };
 use syslog::{Facility, Formatter3164};
 use users::{
@@ -17,7 +18,9 @@ use users::{
     switch::{set_both_gid, set_both_uid, set_effective_gid, set_effective_uid},
 };
 
-mod auth;
+use crate::timestamp::OpenTimestampInfo;
+
+// mod auth;
 mod config;
 mod timestamp;
 
@@ -26,7 +29,7 @@ extern crate pest;
 extern crate pest_derive;
 
 lazy_static! {
-  static ref TIMEOUT: Duration = Duration::new(5 * 60, 0);
+    static ref TIMEOUT: Duration = Duration::new(5 * 60, 0);
 }
 
 #[derive(clap::Parser)]
@@ -44,6 +47,7 @@ struct Cli {
     #[clap(short = 'n', name = "non_interactive")]
     non_interactive: bool,
 
+    /// Clear past authetentications for this session, to require reauthentication on next invocation
     #[clap(short = 'L', name = "clear_past_authentications")]
     clear_past_authentications: bool,
 
@@ -66,11 +70,10 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    // TODO: Allow stuff to run with this
     // Hardening, we drop our permissions down to what the user can do.
-    set_effective_uid(get_current_uid())?;
-    set_effective_gid(get_current_gid())?;
-
-    println!("{}, {}", getuid(), getgid());
+    // set_effective_uid(get_current_uid())?;
+    // set_effective_gid(get_current_gid())?;
 
     let args = Cli::parse();
 
@@ -182,15 +185,25 @@ fn main() -> Result<()> {
     }
 
     let last = rules.last().unwrap();
-    let timestamp = timestamp::open_timestamp_file(*TIMEOUT)?;
+    let timestamp = if last.options.contains(&config::Options::Persist) {
+        Some(timestamp::open_timestamp_file(*TIMEOUT))
+    } else {
+        None
+    };
 
-    if !last.options.contains(&config::Options::NoPass) && !timestamp.valid {
-        let doas_authenticator =
-            auth::DoasAuthenticator::new(user.name().to_str().unwrap().to_owned());
+    if !last.options.contains(&config::Options::NoPass)
+        && !timestamp
+            .as_ref()
+            .map(|o| o.as_ref().map(|t| t.valid).unwrap_or(false))
+            .unwrap_or(false)
+    {
+        let mut context = pam_client::Context::new(
+            "sudo",
+            Some(user.name().to_str().unwrap()),
+            Conversation::new(),
+        )?;
 
-        let mut auth = Authenticator::with_handler("sudo", doas_authenticator)?;
-
-        let result = auth.authenticate();
+        let result = context.authenticate(pam_client::Flag::NONE);
 
         if result.is_err() {
             syslog
@@ -206,12 +219,22 @@ fn main() -> Result<()> {
 
         result.with_context(|| format!("Failed to authenticate with PAM"))?;
 
-        // TODO: no idea what this does
-        auth.open_session()
+        context
+            .acct_mgmt(pam_client::Flag::NONE)
+            .with_context(|| format!("Account is not valid"))?;
+
+        if context.user()? != user.name().to_str().unwrap() {
+            bail!("PAM user does not equal the current user");
+        }
+
+        let mut _session = context
+            .open_session(pam_client::Flag::NONE)
             .with_context(|| format!("Failed to open session with PAM"))?;
     }
 
-    timestamp::set_timestamp_file(&timestamp.file, *TIMEOUT)?;
+    if let Some(Ok(t)) = timestamp {
+        timestamp::set_timestamp_file(&t.file, *TIMEOUT)?;
+    }
 
     // TODO: We handle everything but the "persist" option
 
