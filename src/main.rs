@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
-use clap::Parser;
+use clap::{Parser};
 use config::{find_config, Action};
 use lazy_static::lazy_static;
-use nix::unistd::{getgid, getuid};
+use nix::unistd::{setresgid, setresuid, Gid, Uid};
 use pam_client::conv_cli::Conversation;
 use std::{
     collections::HashMap,
@@ -10,17 +10,15 @@ use std::{
     os::unix::prelude::CommandExt,
     process::{self, Command},
     time::Duration,
+    vec,
 };
 use syslog::{Facility, Formatter3164};
 use users::{
     get_current_gid, get_current_uid, get_user_by_name, get_user_by_uid,
     os::unix::UserExt,
-    switch::{set_both_gid, set_both_uid, set_effective_gid, set_effective_uid},
+    switch::{set_effective_gid, set_effective_uid},
 };
 
-use crate::timestamp::OpenTimestampInfo;
-
-// mod auth;
 mod config;
 mod timestamp;
 
@@ -65,16 +63,12 @@ struct Cli {
     )]
     command: Option<String>,
 
-    #[clap(value_parser)]
+    // TODO: Fix https://github.com/clap-rs/clap/issues/3880
+    #[clap(value_parser, allow_hyphen_values = true)]
     args: Vec<String>,
 }
 
 fn main() -> Result<()> {
-    // TODO: Allow stuff to run with this
-    // Hardening, we drop our permissions down to what the user can do.
-    // set_effective_uid(get_current_uid())?;
-    // set_effective_gid(get_current_gid())?;
-
     let args = Cli::parse();
 
     let user = match get_user_by_uid(get_current_uid()) {
@@ -90,7 +84,8 @@ fn main() -> Result<()> {
         ),
     };
 
-    let target = get_user_by_name(&args.execute_as).unwrap();
+    let target = get_user_by_name(&args.execute_as)
+        .with_context(|| format!("Could not find user {}", &args.execute_as))?;
 
     let command = match args.command {
         Some(command) => Some(command),
@@ -106,6 +101,9 @@ fn main() -> Result<()> {
     }
 
     if let Some(path) = args.check_config {
+        set_effective_uid(get_current_uid())?;
+        set_effective_gid(get_current_gid())?;
+
         let config = config::parse_config(&path)?;
 
         if command.is_none() {
@@ -152,7 +150,7 @@ fn main() -> Result<()> {
     let formatter = Formatter3164 {
         facility: Facility::LOG_USER,
         hostname: None,
-        process: "doas-rust".into(),
+        process: "oko".into(),
         pid: process::id(),
     };
 
@@ -198,7 +196,7 @@ fn main() -> Result<()> {
             .unwrap_or(false)
     {
         let mut context = pam_client::Context::new(
-            "sudo",
+            "oko",
             Some(user.name().to_str().unwrap()),
             Conversation::new(),
         )?;
@@ -236,12 +234,14 @@ fn main() -> Result<()> {
         timestamp::set_timestamp_file(&t.file, *TIMEOUT)?;
     }
 
-    // TODO: We handle everything but the "persist" option
-
     let mut env = HashMap::new();
 
     env.insert(
         "DOAS_USER".to_owned(),
+        user.name().to_str().unwrap().to_string(),
+    );
+    env.insert(
+        "OKO_USER".to_owned(),
         user.name().to_str().unwrap().to_string(),
     );
     env.insert(
@@ -277,6 +277,7 @@ fn main() -> Result<()> {
         for (key, value) in env::vars() {
             if vec![
                 "DOAS_USER",
+                "OKO_USER",
                 "HOME",
                 "LOGNAME",
                 "PATH",
@@ -340,9 +341,11 @@ fn main() -> Result<()> {
             .unwrap();
     }
 
-    set_both_uid(target.uid(), target.uid())?;
-    set_both_gid(target.primary_group_id(), target.primary_group_id())?;
+    let gid = Gid::from_raw(target.primary_group_id());
+    let uid = Uid::from_raw(target.uid());
 
+    setresgid(gid, gid, gid)?;
+    setresuid(uid, uid, uid)?;
     let output = Command::new(command).envs(&env).args(args.args).exec();
     Err(anyhow::Error::new(output))
 }

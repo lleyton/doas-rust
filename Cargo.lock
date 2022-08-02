@@ -231,23 +231,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doas-rust"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 3.2.16",
- "lazy_static",
- "nix",
- "pam-client",
- "pest",
- "pest_derive",
- "procfs",
- "rpassword 7.0.0",
- "syslog",
- "users",
-]
-
-[[package]]
 name = "either"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -526,6 +509,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2819ce041d2ee131036f4fc9d6ae7ae125a3a40e97ba64d04fe799ad9dabbb44"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "oko"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 3.2.16",
+ "lazy_static",
+ "nix",
+ "pam-client",
+ "pest",
+ "pest_derive",
+ "procfs",
+ "rpassword 7.0.0",
+ "syslog",
+ "users",
 ]
 
 [[package]]

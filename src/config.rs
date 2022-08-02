@@ -9,8 +9,9 @@ use std::{fs, path::Path};
 #[grammar = "config.pest"]
 pub struct ConfigParser;
 
+// TODO: Security vuln, if file does not exit, then rip
 pub fn find_config() -> Option<&'static Path> {
-    let doas_rust_path = Path::new("/etc/doas-rust.conf");
+    let doas_rust_path = Path::new("/etc/oko.conf");
     let doas_path = Path::new("/etc/doas.conf");
     if doas_rust_path.exists() {
         Some(doas_rust_path)

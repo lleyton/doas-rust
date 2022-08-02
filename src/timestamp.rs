@@ -23,7 +23,7 @@ use std::{
 };
 
 lazy_static! {
-    static ref TIMESTAMP_DIR: PathBuf = PathBuf::from("/run/doas");
+    static ref TIMESTAMP_DIR: PathBuf = PathBuf::from("/run/oko");
 }
 
 struct ProcessTTYInfo {
@@ -179,8 +179,9 @@ pub fn open_timestamp_file(timeout: Duration) -> Result<OpenTimestampInfo> {
 
 pub fn clear_timestamp() -> Result<()> {
     let path = TIMESTAMP_DIR.join(get_timestamp_file_path()?);
+
     match unlink(&path) {
-        Ok(_) | Err(Errno::ENONET) => Ok(()),
+        Ok(_) | Err(Errno::ENOENT) => Ok(()),
         Err(e) => bail!(e),
     }
 }
