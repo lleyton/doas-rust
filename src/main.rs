@@ -1,12 +1,14 @@
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use config::{find_config, Action};
+use lazy_static::lazy_static;
+use nix::{unistd::{getgid, getuid}};
 use pam::Authenticator;
 use std::{
     collections::HashMap,
     env,
     os::unix::prelude::CommandExt,
-    process::{self, Command},
+    process::{self, Command}, time::Duration,
 };
 use syslog::{Facility, Formatter3164};
 use users::{
@@ -15,11 +17,17 @@ use users::{
     switch::{set_both_gid, set_both_uid, set_effective_gid, set_effective_uid},
 };
 
+mod auth;
 mod config;
+mod timestamp;
 
 extern crate pest;
 #[macro_use]
 extern crate pest_derive;
+
+lazy_static! {
+  static ref TIMEOUT: Duration = Duration::new(5 * 60, 0);
+}
 
 #[derive(clap::Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -62,6 +70,8 @@ fn main() -> Result<()> {
     set_effective_uid(get_current_uid())?;
     set_effective_gid(get_current_gid())?;
 
+    println!("{}, {}", getuid(), getgid());
+
     let args = Cli::parse();
 
     let user = match get_user_by_uid(get_current_uid()) {
@@ -86,6 +96,11 @@ fn main() -> Result<()> {
         }
         None => None,
     };
+
+    if args.clear_past_authentications {
+        timestamp::clear_timestamp()?;
+        return Ok(());
+    }
 
     if let Some(path) = args.check_config {
         let config = config::parse_config(&path)?;
@@ -167,16 +182,13 @@ fn main() -> Result<()> {
     }
 
     let last = rules.last().unwrap();
+    let timestamp = timestamp::open_timestamp_file(*TIMEOUT)?;
 
-    if !last.options.contains(&config::Options::NoPass) {
-        let mut auth = Authenticator::with_password("sudo")
-            .with_context(|| format!("Failed to start PAM client"))?;
+    if !last.options.contains(&config::Options::NoPass) && !timestamp.valid {
+        let doas_authenticator =
+            auth::DoasAuthenticator::new(user.name().to_str().unwrap().to_owned());
 
-        let password = rpassword::prompt_password("Password: ")
-            .with_context(|| format!("Failed to read password"))?;
-
-        auth.get_handler()
-            .set_credentials(user.name().to_str().unwrap(), password);
+        let mut auth = Authenticator::with_handler("sudo", doas_authenticator)?;
 
         let result = auth.authenticate();
 
@@ -198,6 +210,8 @@ fn main() -> Result<()> {
         auth.open_session()
             .with_context(|| format!("Failed to open session with PAM"))?;
     }
+
+    timestamp::set_timestamp_file(&timestamp.file, *TIMEOUT)?;
 
     // TODO: We handle everything but the "persist" option
 
