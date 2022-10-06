@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use clap::{Parser};
+use clap::Parser;
 use config::{find_config, Action};
 use lazy_static::lazy_static;
 use nix::unistd::{setresgid, setresuid, Gid, Uid};
@@ -31,10 +31,10 @@ lazy_static! {
 }
 
 #[derive(clap::Parser)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author, version, about, long_about = None, allow_hyphen_values = true, trailing_var_arg = true)]
 struct Cli {
     /// Validates the configuration file, running a permissions check if a command is specified, which returns either 'permit', 'permit nopass', or 'deny'
-    #[clap(short = 'C', name = "check_config", parse(from_os_str))]
+    #[clap(short = 'C', name = "check_config")]
     check_config: Option<std::path::PathBuf>,
 
     /// The user to execute the command as
@@ -63,7 +63,6 @@ struct Cli {
     )]
     command: Option<String>,
 
-    // TODO: Fix https://github.com/clap-rs/clap/issues/3880
     #[clap(value_parser, allow_hyphen_values = true)]
     args: Vec<String>,
 }
